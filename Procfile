@@ -1,2 +1,2 @@
-web: gunicorn -w 1 wsgi:app -b 127.0.0.1:$PORT
+web: gunicorn -w 1 wsgi:app
 worker: rq worker
