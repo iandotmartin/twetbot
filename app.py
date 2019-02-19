@@ -1,91 +1,128 @@
+import json
 import os
 
-import requests
+from dotenv import load_dotenv
 from flask import Flask
 from flask import request
+from redis import Redis
+import requests
+from rq import Queue
+from slackclient import SlackClient
 
 from twet import APIClient
 
 
+load_dotenv()
+
 app = Flask(__name__)
+
+slack_token = os.environ["SLACK_API_TOKEN"]
+sc = SlackClient(slack_token)
+
 twitter = APIClient()
 
+q = Queue(connection=Redis())
 
-@app.route('/challenge', methods=['GET', 'POST'])
+
+@app.route("/", methods=["GET", "POST"])
 def challenge():
-    challenge = request.json.get('challenge')
-
-    return challenge or 'no challenge, huh?!'
+    return request.json.get("challenge")
 
 
-@app.route('/', methods=['GET', 'POST'])
-def say_hi():
-    return "booya"
+@app.route("/actions", methods=["GET", "POST"])
+def actions():
+    payload = json.loads(request.form["payload"])
+    # clean up message where button was pressed
+    data = {
+        "response_type": "ephemeral",
+        "text": "",
+        "replace_original": True,
+        "delete_original": True,
+    }
+    requests.post(payload["response_url"], json=data)
+    channel_id = payload["channel"]["id"]
+
+    if payload["callback_id"].startswith("select_tweet"):
+        tweet_id = payload["callback_id"].lstrip("select_tweet_")
+        sc.api_call(
+            "chat.postMessage",
+            channel=channel_id,
+            text=f"http://twitter.com/dril/status/{tweet_id}",
+        )
+
+    return "ok", 204
 
 
-@app.route('/dril', methods=['POST'])
+@app.route("/dril", methods=["POST"])
 def dril_twet():
-    query = request.form.get('text')
+    query = request.form.get("text")
+    channel_id = request.form.get("channel_id")
+    user_id = request.form.get("user_id")
 
     if not query:
         return """i approve of congres... i believe they are doing a very good job despite negative comments online
 
-        p.s. enter a query next time"""
+        p.s. enter something to search for next time"""
 
-    response_url = request.form.get('response_url')
+    q.enqueue(send_tweet_options, args=[query, channel_id, user_id], timeout="60s")
 
-    # send initial response to slack
-
-    data = {
-        "text": f"lookin for {query}",
-        "attachments": [
-            {
-                "text":"B-)"
-            }
-        ]
-    }
-    resp = requests.post(response_url, json=data)
-    send_tweet_options(query, response_url)
-
-    return 'ok', 204
+    return "ok", 204
 
 
-@app.route('/dril/choose', methods=['POST'])
-def choose_and_post_tweet():
-    # gets a twitter url or id of some sort
-    # deletes original message and posts embeddable url to a given slack room
-    return "ok"
-
-
-def send_tweet_options(query, response_url):
+def send_tweet_options(query, channel_id, user_id):
     tweets = twitter.get_good_tweets(query)
-
-    headers = {'Content-type':'application /json'}
-    data = {
-        "text": f"here's your awful tweets",
-        "attachments": format_tweet_summaries(tweets)
+    top_tweets = sorted(tweets, key=lambda tweet: tweet.likes, reverse=True)
+    tweet_attachments = format_tweet_summaries(top_tweets[:10])
+    cancel_button = {
+        "text": "",
+        "callback_id": "cancel_button",
+        "actions": [
+            {
+                "text": "every post is terrible. just terrible",
+                "name": "cancel",
+                "type": "button",
+                "style": "danger",
+            }
+        ],
     }
-    resp = requests.post(response_url, json=data, headers=headers)
+    tweet_attachments.append(cancel_button)
+
+    sc.api_call(
+        "chat.postEphemeral",
+        channel=channel_id,
+        user=user_id,
+        text="select a musing...",
+        attachments=tweet_attachments,
+    )
 
 
 def format_tweet_summaries(tweets):
-    # TODO: Format Slack Message Nicely.
-    # We'll need to make it so this message has clickable buttons so users
-    # can choose the twet that they'd like to embed. for now this probably sucks so lets go
     slack_formatted_tweets = []
+    max_attachment_length = 70
     for tweet in tweets:
-        slack_formatted_tweets.append({
-            "text": tweet.text,
-            "callback_id": tweet.id,
-            "actions": [
-                {
-                    "name": "select",
-                    "text": "select, this awful post",
-                    "type": "button",
-                    "value": "select"
-                },
-            ]
-        })
+        tweet_stats = f"♥️ {tweet.likes} ♻️ {tweet.retweets}"
+        snippet_length = max_attachment_length - len(tweet_stats)
+
+        tweet_snippet = tweet.text.replace('\n', ' ')
+        if len(tweet.text) > snippet_length:
+            tweet_snippet = f"{tweet_snippet[:snippet_length-10].strip()}...".ljust(snippet_length)
+        else:
+            tweet_snippet = tweet_snippet.ljust(snippet_length)
+
+        slack_formatted_tweets.append(
+            {
+                "text": f"```{tweet_snippet}{tweet_stats}```",
+                "callback_id": f"select_tweet_{tweet.id}",
+                "actions": [
+                    {
+                        "name": "select",
+                        "text": "select, this awful post",
+                        "type": "button",
+                        "value": "select",
+                        "style": "primary",
+                    }
+                ],
+            }
+        )
 
     return slack_formatted_tweets
-
