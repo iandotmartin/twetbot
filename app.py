@@ -24,7 +24,7 @@ twitter = APIClient()
 
 if os.environ.get('REDISCLOUD_URL'):
     redis_url = urlparse(os.environ.get('REDISCLOUD_URL'))
-    redis_client = redis.Redis(host=redis_url.hostname, port=redis_url.port, password=redis_url.password)
+    redis_client = Redis(host=redis_url.hostname, port=redis_url.port, password=redis_url.password)
 else:
     redis_client = Redis()
 
