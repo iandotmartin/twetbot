@@ -1,11 +1,12 @@
 import json
 import os
+from urlparse import urlparse
 
+import requests
 from dotenv import load_dotenv
 from flask import Flask
 from flask import request
 from redis import Redis
-import requests
 from rq import Queue
 from slackclient import SlackClient
 
@@ -21,7 +22,14 @@ sc = SlackClient(slack_token)
 
 twitter = APIClient()
 
-q = Queue(connection=Redis())
+if os.environ.get('REDISCLOUD_URL'):
+    redis_url = urlparse(os.environ.get('REDISCLOUD_URL'))
+    redis_client = redis.Redis(host=redis_url.hostname, port=redis_url.port, password=redis_url.password)
+else:
+    redis_client = Redis()
+
+q = Queue(connection=redis_client)
+
 
 
 @app.route("/", methods=["GET", "POST"])
