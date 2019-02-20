@@ -16,20 +16,20 @@ from twet import APIClient
 load_dotenv()
 
 app = Flask(__name__)
-
 slack_token = os.environ["SLACK_API_TOKEN"]
 sc = SlackClient(slack_token)
 
 twitter = APIClient()
 
-if os.environ.get('REDISCLOUD_URL'):
-    redis_url = urlparse(os.environ.get('REDISCLOUD_URL'))
-    redis_client = Redis(host=redis_url.hostname, port=redis_url.port, password=redis_url.password)
+if os.environ.get("REDISCLOUD_URL"):
+    redis_url = urlparse(os.environ.get("REDISCLOUD_URL"))
+    redis_client = Redis(
+        host=redis_url.hostname, port=redis_url.port, password=redis_url.password
+    )
 else:
     redis_client = Redis()
 
 q = Queue(connection=redis_client)
-
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -58,12 +58,12 @@ def post_tweet_to_channel(payload):
     # post tweet if selected
     if payload["callback_id"].startswith("select_tweet"):
         tweet_id = payload["callback_id"].lstrip("select_tweet_")
-        sc.api_call(
+        resp = sc.api_call(
             "chat.postMessage",
             channel=channel_id,
             text=f"http://twitter.com/dril/status/{tweet_id}",
         )
-
+        print(f"Tweet posted: {resp}")
 
 
 @app.route("/dril", methods=["POST"])
@@ -100,13 +100,14 @@ def send_tweet_options(query, channel_id, user_id):
     }
     tweet_attachments.append(cancel_button)
 
-    sc.api_call(
+    resp = sc.api_call(
         "chat.postEphemeral",
         channel=channel_id,
         user=user_id,
         text="select a musing...",
         attachments=tweet_attachments,
     )
+    print(f"Tweet options sent: {resp}")
 
 
 def format_tweet_summaries(tweets):
@@ -116,9 +117,11 @@ def format_tweet_summaries(tweets):
         tweet_stats = f"♥️ {tweet.likes} ♻️ {tweet.retweets}"
         snippet_length = max_attachment_length - len(tweet_stats)
 
-        tweet_snippet = tweet.text.replace('\n', ' ')
+        tweet_snippet = tweet.text.replace("\n", " ")
         if len(tweet.text) > snippet_length:
-            tweet_snippet = f"{tweet_snippet[:snippet_length-10].strip()}...".ljust(snippet_length)
+            tweet_snippet = f"{tweet_snippet[:snippet_length-10].strip()}...".ljust(
+                snippet_length
+            )
         else:
             tweet_snippet = tweet_snippet.ljust(snippet_length)
 
