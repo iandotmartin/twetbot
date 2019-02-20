@@ -37,9 +37,14 @@ def challenge():
     return request.json.get("challenge")
 
 
-@app.route("/actions", methods=["GET", "POST"])
+@app.route("/actions", methods=["POST"])
 def actions():
     payload = json.loads(request.form["payload"])
+    q.enqueue(post_tweet_to_channel, args=[payload], timeout="10s")
+    return "ok", 204
+
+
+def post_tweet_to_channel(payload):
     # clean up message where button was pressed
     data = {
         "response_type": "ephemeral",
@@ -50,6 +55,7 @@ def actions():
     requests.post(payload["response_url"], json=data)
     channel_id = payload["channel"]["id"]
 
+    # post tweet if selected
     if payload["callback_id"].startswith("select_tweet"):
         tweet_id = payload["callback_id"].lstrip("select_tweet_")
         sc.api_call(
@@ -58,7 +64,6 @@ def actions():
             text=f"http://twitter.com/dril/status/{tweet_id}",
         )
 
-    return "ok", 204
 
 
 @app.route("/dril", methods=["POST"])
@@ -72,7 +77,7 @@ def dril_twet():
 
         p.s. enter something to search for next time"""
 
-    q.enqueue(send_tweet_options, args=[query, channel_id, user_id], timeout="60s")
+    q.enqueue(send_tweet_options, args=[query, channel_id, user_id], timeout="20s")
 
     return "ok", 204
 
